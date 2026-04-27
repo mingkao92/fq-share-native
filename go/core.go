@@ -70,22 +70,28 @@ type httpHandler struct {
 }
 
 type fileEntry struct {
-	Name  string `json:"name"`
-	Size  int64  `json:"size"`
-	MTime int64  `json:"mtime"`
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	MTime      int64  `json:"mtime"`
+	DeviceID   string `json:"device_id,omitempty"`
+	DeviceName string `json:"device_name,omitempty"`
 }
 
 type textEntry struct {
-	ID    string `json:"id"`
-	Text  string `json:"text"`
-	MTime int64  `json:"mtime"`
+	ID         string `json:"id"`
+	Text       string `json:"text"`
+	MTime      int64  `json:"mtime"`
+	DeviceID   string `json:"device_id,omitempty"`
+	DeviceName string `json:"device_name,omitempty"`
 }
 
 type timelineEntry struct {
-	Bucket string `json:"bucket"`
-	Kind   string `json:"kind"`
-	Name   string `json:"name,omitempty"`
-	Text   string `json:"text,omitempty"`
-	Size   int64  `json:"size,omitempty"`
-	MTime  int64  `json:"mtime"`
+	Bucket     string `json:"bucket"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name,omitempty"`
+	Text       string `json:"text,omitempty"`
+	Size       int64  `json:"size,omitempty"`
+	MTime      int64  `json:"mtime"`
+	DeviceID   string `json:"device_id,omitempty"`
+	DeviceName string `json:"device_name,omitempty"`
 }

@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,8 +27,17 @@ type sessionContext struct {
 	rootDir         string
 	uploadsDir      string
 	sharedDir       string
+	uploadsMetaPath string
+	sharedMetaPath  string
 	uploadTextsPath string
 	sharedTextsPath string
+}
+
+const deviceIDCookieName = "fq_device_id"
+
+type deviceInfo struct {
+	ID   string
+	Name string
 }
 
 func runHTTPMode(args []string) error {
@@ -111,6 +122,7 @@ func (h *httpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodGet && (path == "/" || path == "/index.html") {
 		h.markPageVisit(session.token)
+		ensureDeviceCookie(w, r)
 		body := []byte(renderMobilePage(session.token, requestLang(r)))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
@@ -245,8 +257,8 @@ func (h *httpHandler) handleList(w http.ResponseWriter, session sessionContext) 
 	prunedSharedTexts := pruneOldTextEntries(session.sharedTextsPath, maxFileAge)
 	pageVisits, lastPageVisit := h.snapshotPageStats(session.token)
 
-	uploads := listFiles(session.uploadsDir)
-	shared := listFiles(session.sharedDir)
+	uploads := listFiles(session.uploadsDir, session.uploadsMetaPath)
+	shared := listFiles(session.sharedDir, session.sharedMetaPath)
 	uploadTexts := listTextEntries(session.uploadTextsPath)
 	sharedTexts := listTextEntries(session.sharedTextsPath)
 
@@ -339,10 +351,12 @@ func (h *httpHandler) handleClear(w http.ResponseWriter, r *http.Request, sessio
 	deleted := 0
 	if scope == "all" || scope == "uploads" {
 		deleted += clearFiles(session.uploadsDir)
+		_ = clearFileEntries(session.uploadsMetaPath)
 		deleted += clearTextEntries(session.uploadTextsPath)
 	}
 	if scope == "all" || scope == "shared" {
 		deleted += clearFiles(session.sharedDir)
+		_ = clearFileEntries(session.sharedMetaPath)
 		deleted += clearTextEntries(session.sharedTextsPath)
 	}
 
@@ -373,16 +387,19 @@ func (h *httpHandler) handleUpload(w http.ResponseWriter, r *http.Request, sessi
 	}
 
 	targetDir := session.uploadsDir
+	targetMetaPath := session.uploadsMetaPath
 	if r.URL.Path == "/api/share" {
 		targetDir = session.sharedDir
+		targetMetaPath = session.sharedMetaPath
 	}
+	device := deviceInfoFromRequest(r)
 
 	saved := make([]map[string]any, 0, len(files))
 	for _, fileHeader := range files {
 		if fileHeader == nil || strings.TrimSpace(fileHeader.Filename) == "" {
 			continue
 		}
-		name, size, err := saveUploadedFile(fileHeader, targetDir)
+		name, size, err := saveUploadedFile(fileHeader, targetDir, targetMetaPath, device)
 		if err != nil {
 			continue
 		}
@@ -417,8 +434,9 @@ func (h *httpHandler) handleText(w http.ResponseWriter, r *http.Request, session
 	if r.URL.Path == "/api/share-text" {
 		targetPath = session.sharedTextsPath
 	}
+	device := deviceInfoFromRequest(r)
 
-	entry, err := appendTextEntry(targetPath, text)
+	entry, err := appendTextEntry(targetPath, text, device)
 	if err != nil {
 		h.sendJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "save text failed"})
 		return
@@ -527,6 +545,75 @@ func (h *httpHandler) resolveBaseURL(r *http.Request) string {
 	return fmt.Sprintf("%s://%s", proto, host)
 }
 
+func ensureDeviceCookie(w http.ResponseWriter, r *http.Request) string {
+	if cookie, err := r.Cookie(deviceIDCookieName); err == nil {
+		value := strings.TrimSpace(cookie.Value)
+		if value != "" {
+			return value
+		}
+	}
+	value := strconv.FormatInt(time.Now().UnixNano(), 36)
+	http.SetCookie(w, &http.Cookie{
+		Name:     deviceIDCookieName,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   86400 * 30,
+		HttpOnly: false,
+		SameSite: http.SameSiteLaxMode,
+	})
+	return value
+}
+
+func deviceInfoFromRequest(r *http.Request) deviceInfo {
+	id := ""
+	if cookie, err := r.Cookie(deviceIDCookieName); err == nil {
+		id = strings.TrimSpace(cookie.Value)
+	}
+	if id == "" {
+		id = fallbackDeviceID(r)
+	}
+	return deviceInfo{
+		ID:   id,
+		Name: describeDevice(r),
+	}
+}
+
+func fallbackDeviceID(r *http.Request) string {
+	sample := strings.TrimSpace(clientIP(r))
+	if sample == "" {
+		sample = strings.TrimSpace(r.UserAgent())
+	}
+	if sample == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(sample))
+	return hex.EncodeToString(sum[:8])
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil && host != "" {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func describeDevice(r *http.Request) string {
+	ip := strings.TrimSpace(clientIP(r))
+	if addr, err := netip.ParseAddr(ip); err == nil {
+		if addr.Is4() {
+			parts := strings.Split(addr.String(), ".")
+			return fmt.Sprintf("Phone %s", parts[len(parts)-1])
+		}
+		short := addr.String()
+		if len(short) > 12 {
+			short = short[len(short)-12:]
+		}
+		return "Phone " + short
+	}
+	return "Phone"
+}
+
 func (h *httpHandler) markPageVisit(token string) {
 	stats := h.getTokenStats(token)
 	stats.markPageVisit()
@@ -563,6 +650,8 @@ func buildSessionContext(cfg httpConfig, token string) sessionContext {
 		rootDir:         rootDir,
 		uploadsDir:      filepath.Join(rootDir, "uploads"),
 		sharedDir:       filepath.Join(rootDir, "shared"),
+		uploadsMetaPath: filepath.Join(rootDir, "uploads_files.jsonl"),
+		sharedMetaPath:  filepath.Join(rootDir, "shared_files.jsonl"),
 		uploadTextsPath: filepath.Join(rootDir, "uploads_texts.jsonl"),
 		sharedTextsPath: filepath.Join(rootDir, "shared_texts.jsonl"),
 	}
@@ -617,7 +706,7 @@ func buildAttachmentDisposition(name string) string {
 	return fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s", asciiFallback, url.PathEscape(name))
 }
 
-func saveUploadedFile(fileHeader *multipart.FileHeader, targetDir string) (string, int64, error) {
+func saveUploadedFile(fileHeader *multipart.FileHeader, targetDir, metaPath string, device deviceInfo) (string, int64, error) {
 	filename := sanitizeFilename(fileHeader.Filename)
 
 	src, err := fileHeader.Open()
@@ -634,6 +723,15 @@ func saveUploadedFile(fileHeader *multipart.FileHeader, targetDir string) (strin
 
 	size, err := io.Copy(dst, src)
 	if err != nil {
+		return "", 0, err
+	}
+	if err := appendFileEntry(metaPath, fileEntry{
+		Name:       finalName,
+		Size:       size,
+		MTime:      time.Now().Unix(),
+		DeviceID:   device.ID,
+		DeviceName: device.Name,
+	}); err != nil {
 		return "", 0, err
 	}
 	return finalName, size, nil
@@ -662,10 +760,17 @@ func createUniqueFile(baseDir, filename string) (*os.File, string, error) {
 	return nil, "", errors.New("failed to allocate unique filename")
 }
 
-func listFiles(baseDir string) []fileEntry {
+func listFiles(baseDir, metaPath string) []fileEntry {
 	entries, err := os.ReadDir(baseDir)
 	if err != nil {
 		return []fileEntry{}
+	}
+	metaByName := map[string]fileEntry{}
+	for _, meta := range listFileEntries(metaPath) {
+		if meta.Name == "" {
+			continue
+		}
+		metaByName[meta.Name] = meta
 	}
 	result := make([]fileEntry, 0, len(entries))
 	for _, entry := range entries {
@@ -676,11 +781,19 @@ func listFiles(baseDir string) []fileEntry {
 		if err != nil {
 			continue
 		}
-		result = append(result, fileEntry{
+		row := fileEntry{
 			Name:  entry.Name(),
 			Size:  info.Size(),
 			MTime: info.ModTime().Unix(),
-		})
+		}
+		if meta, ok := metaByName[entry.Name()]; ok {
+			row.DeviceID = meta.DeviceID
+			row.DeviceName = meta.DeviceName
+			if meta.MTime > 0 {
+				row.MTime = meta.MTime
+			}
+		}
+		result = append(result, row)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].MTime < result[j].MTime
@@ -712,11 +825,13 @@ func pruneOldFiles(baseDir string, maxAge time.Duration) int {
 	return removed
 }
 
-func appendTextEntry(path, text string) (textEntry, error) {
+func appendTextEntry(path, text string, device deviceInfo) (textEntry, error) {
 	entry := textEntry{
-		ID:    strconv.FormatInt(time.Now().UnixNano(), 36),
-		Text:  text,
-		MTime: time.Now().Unix(),
+		ID:         strconv.FormatInt(time.Now().UnixNano(), 36),
+		Text:       text,
+		MTime:      time.Now().Unix(),
+		DeviceID:   device.ID,
+		DeviceName: device.Name,
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -790,6 +905,13 @@ func clearTextEntries(path string) int {
 	return len(entries)
 }
 
+func clearFileEntries(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func writeTextEntries(path string, entries []textEntry) error {
 	if len(entries) == 0 {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -809,40 +931,86 @@ func writeTextEntries(path string, entries []textEntry) error {
 	return os.WriteFile(path, []byte(payload), 0o644)
 }
 
+func appendFileEntry(path string, entry fileEntry) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(data, '\n'))
+	return err
+}
+
+func listFileEntries(path string) []fileEntry {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return []fileEntry{}
+	}
+	lines := strings.Split(string(data), "\n")
+	result := make([]fileEntry, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry fileEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry.Name == "" {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
 func buildTimeline(sharedFiles []fileEntry, uploadFiles []fileEntry, sharedTexts []textEntry, uploadTexts []textEntry) []timelineEntry {
 	result := make([]timelineEntry, 0, len(sharedFiles)+len(uploadFiles)+len(sharedTexts)+len(uploadTexts))
 	for _, file := range sharedFiles {
 		result = append(result, timelineEntry{
-			Bucket: "shared",
-			Kind:   "file",
-			Name:   file.Name,
-			Size:   file.Size,
-			MTime:  file.MTime,
+			Bucket:     "shared",
+			Kind:       "file",
+			Name:       file.Name,
+			Size:       file.Size,
+			MTime:      file.MTime,
+			DeviceID:   file.DeviceID,
+			DeviceName: file.DeviceName,
 		})
 	}
 	for _, file := range uploadFiles {
 		result = append(result, timelineEntry{
-			Bucket: "uploads",
-			Kind:   "file",
-			Name:   file.Name,
-			Size:   file.Size,
-			MTime:  file.MTime,
+			Bucket:     "uploads",
+			Kind:       "file",
+			Name:       file.Name,
+			Size:       file.Size,
+			MTime:      file.MTime,
+			DeviceID:   file.DeviceID,
+			DeviceName: file.DeviceName,
 		})
 	}
 	for _, entry := range sharedTexts {
 		result = append(result, timelineEntry{
-			Bucket: "shared",
-			Kind:   "text",
-			Text:   entry.Text,
-			MTime:  entry.MTime,
+			Bucket:     "shared",
+			Kind:       "text",
+			Text:       entry.Text,
+			MTime:      entry.MTime,
+			DeviceID:   entry.DeviceID,
+			DeviceName: entry.DeviceName,
 		})
 	}
 	for _, entry := range uploadTexts {
 		result = append(result, timelineEntry{
-			Bucket: "uploads",
-			Kind:   "text",
-			Text:   entry.Text,
-			MTime:  entry.MTime,
+			Bucket:     "uploads",
+			Kind:       "text",
+			Text:       entry.Text,
+			MTime:      entry.MTime,
+			DeviceID:   entry.DeviceID,
+			DeviceName: entry.DeviceName,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
