@@ -1,0 +1,5 @@
+*.log
+go/dist/
+go/free-quick-share-host*
+.DS_Store
+.idea/
