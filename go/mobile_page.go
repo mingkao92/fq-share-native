@@ -88,26 +88,26 @@ func renderMobilePage(token string, lang string) string {
   <title>Free Quick Share</title>
   <style>
     :root {
-      --bg: #f4f0e6;
-      --ink: #1d2b23;
-      --muted: #617267;
-      --line: #d8e4dc;
-      --card: rgba(255,255,255,.88);
-      --phone: #fefefe;
-      --computer: #0c7c60;
-      --computer-ink: #ffffff;
-      --surface: #eef6f1;
+      --bg-a: #f6f4ee;
+      --bg-b: #dff2e9;
+      --panel: rgba(255,255,255,.82);
+      --ink: #152019;
+      --muted: #5a6d63;
+      --line: #dbe6df;
+      --brand: #13795b;
+      --brand-deep: #0c5b44;
+      --brand-line: rgba(19,121,91,.18);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at top left, #fff7d6 0, transparent 36%%),
-        radial-gradient(circle at top right, #d6efe3 0, transparent 34%%),
-        linear-gradient(180deg, #f8f4eb, #eef4ef);
-      padding: 14px;
+        radial-gradient(circle at 12%% 0%%, #fefee8 0, transparent 40%%),
+        radial-gradient(circle at 90%% 6%%, #c9ecd8 0, transparent 45%%),
+        linear-gradient(155deg, var(--bg-a), var(--bg-b));
+      padding: 16px;
     }
     .shell {
       max-width: 780px;
@@ -116,11 +116,11 @@ func renderMobilePage(token string, lang string) string {
       gap: 12px;
     }
     .card {
-      background: var(--card);
-      backdrop-filter: blur(8px);
       border: 1px solid rgba(255,255,255,.7);
+      background: linear-gradient(180deg, var(--panel), rgba(248,252,250,.96));
+      backdrop-filter: blur(10px);
       border-radius: 18px;
-      box-shadow: 0 16px 40px rgba(0,0,0,.08);
+      box-shadow: 0 18px 30px rgba(9,49,35,.07);
       padding: 14px;
     }
     h1 {
@@ -138,13 +138,43 @@ func renderMobilePage(token string, lang string) string {
       font-size: 13px;
     }
     button {
-      border: none;
-      border-radius: 12px;
-      padding: 10px 14px;
-      background: linear-gradient(145deg, #149271, #0c6a53);
-      color: white;
-      font-weight: 700;
+      border: 1px solid var(--brand-line);
+      background: rgba(247,251,249,.98);
+      color: var(--brand-deep);
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-size: 13px;
+      font-weight: 600;
       cursor: pointer;
+      box-shadow: none;
+      transition: transform .08s ease, background .12s ease, border-color .12s ease, color .12s ease, opacity .12s ease;
+    }
+    button:hover {
+      border-color: rgba(19,121,91,.3);
+      background: rgba(240,248,244,.98);
+    }
+    button:active {
+      transform: scale(.985);
+      background: rgba(232,243,237,.98);
+    }
+    button:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(19,121,91,.14);
+    }
+    button:disabled {
+      cursor: not-allowed;
+      transform: none;
+      color: #98aaa1;
+      border-color: rgba(152,170,161,.28);
+      background: rgba(243,246,245,.96);
+      box-shadow: none;
+      opacity: 1;
+    }
+    button:disabled:hover,
+    button:disabled:active {
+      transform: none;
+      border-color: rgba(152,170,161,.28);
+      background: rgba(243,246,245,.96);
     }
     .composer {
       display: grid;
@@ -162,10 +192,10 @@ func renderMobilePage(token string, lang string) string {
       border-radius: 14px;
       padding: 8px 10px;
       background: #fff;
-      transition: border-color .12s ease, background .12s ease;
+      transition: border-color .12s ease, background .12s ease, box-shadow .12s ease;
     }
     .inputWrap.hasFiles {
-      border-color: rgba(12, 124, 96, .35);
+      border-color: rgba(19,121,91,.38);
       background: linear-gradient(180deg, #fbfffd, #f2fbf6);
     }
     .inputRow {
@@ -183,8 +213,10 @@ func renderMobilePage(token string, lang string) string {
       padding: 0;
       border-radius: 10px;
       background: #eef6f2;
-      color: #0f7158;
+      color: var(--brand-deep);
       box-shadow: none;
+      font-size: 20px;
+      line-height: 1;
     }
     .pickBtn:disabled {
       opacity: .45;
@@ -206,7 +238,7 @@ func renderMobilePage(token string, lang string) string {
       padding: 5px 9px;
       border-radius: 10px;
       background: #eef8f3;
-      color: #0f7158;
+      color: var(--brand-deep);
       white-space: nowrap;
       font-size: 13px;
     }
@@ -236,6 +268,7 @@ func renderMobilePage(token string, lang string) string {
       font: inherit;
       color: var(--ink);
       line-height: 1.4;
+      font-size: 15px;
       overflow-y: auto;
     }
     .inputWrap textarea:focus {
@@ -255,7 +288,7 @@ func renderMobilePage(token string, lang string) string {
     }
     .composerStatus {
       min-height: 18px;
-      margin: 0 4px;
+      margin: 6px 4px 0;
       color: #a2373a;
     }
     .composerStatus:empty {
@@ -264,10 +297,11 @@ func renderMobilePage(token string, lang string) string {
     .thread {
       list-style: none;
       margin: 0;
-      padding: 4px 0 0;
+      padding: 4px 2px 10px;
       display: grid;
       gap: 10px;
-      max-height: 52vh;
+      min-height: 240px;
+      max-height: 42vh;
       overflow: auto;
     }
     .row {
@@ -278,23 +312,23 @@ func renderMobilePage(token string, lang string) string {
     .row.shared { align-items: flex-end; }
     .row.uploads { align-items: flex-start; }
     .bubble {
-      max-width: min(82%%, 520px);
-      border-radius: 18px;
-      padding: 10px 12px;
-      line-height: 1.45;
+      max-width: min(82%%, 480px);
+      padding: 11px 13px;
+      border-radius: 12px;
+      line-height: 1.5;
       white-space: pre-wrap;
       word-break: break-word;
-      box-shadow: 0 8px 16px rgba(0,0,0,.05);
+      font-size: 15px;
+      box-shadow: 0 6px 14px rgba(0,0,0,.04);
     }
     .row.shared .bubble {
-      background: linear-gradient(180deg, #11906f, var(--computer));
-      color: var(--computer-ink);
-      border-bottom-right-radius: 8px;
+      background: linear-gradient(145deg, #0b8a6a, var(--brand-deep));
+      color: #fff;
     }
     .row.uploads .bubble {
       background: #fff;
+      color: var(--ink);
       border: 1px solid var(--line);
-      border-bottom-left-radius: 8px;
     }
     .bubble .title {
       font-weight: 700;
@@ -308,13 +342,14 @@ func renderMobilePage(token string, lang string) string {
       text-decoration: none;
       font-size: 12px;
       font-weight: 700;
-      background: rgba(255,255,255,.2);
+      background: rgba(255,255,255,.14);
       color: inherit;
-      border: 1px solid rgba(255,255,255,.25);
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
     }
     .row.uploads .bubble .action {
-      background: #edf7f2;
-      color: #0f7158;
+      background: #eef8f3;
+      color: var(--brand-deep);
       border-color: #d6ebe2;
     }
     .meta {
@@ -324,8 +359,8 @@ func renderMobilePage(token string, lang string) string {
       margin-left: 6px;
       padding: 2px 7px;
       border-radius: 999px;
-      background: rgba(15, 113, 88, .1);
-      color: #0f7158;
+      background: rgba(10,127,99,.1);
+      color: var(--brand-deep);
       font-size: 12px;
     }
     .empty {
